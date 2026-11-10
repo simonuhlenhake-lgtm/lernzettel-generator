@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lernzettel-Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#172033;--muted:#667085;--accent:#635bff;--line:#e5e8f0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:42px 20px 30px;text-align:center;background:linear-gradient(135deg,#24205d,#635bff);color:white}
+header h1{margin:0 0 8px;font-size:clamp(2rem,5vw,3rem)}header p{margin:0;color:#e5e4ff}
+main{max-width:950px;margin:28px auto;padding:0 16px 50px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:18px;box-shadow:0 8px 28px #18204a0a}
+h2{font-size:1.2rem;margin:0 0 12px}.muted{color:var(--muted);font-size:.94rem}
+.drop{border:2px dashed #b8b6f5;border-radius:14px;padding:28px;text-align:center;background:#fafaff;cursor:pointer}
+.drop.drag{background:#eeedff;border-color:var(--accent)}input[type=file]{display:none}
+button,.filebutton{border:0;border-radius:10px;padding:11px 16px;background:var(--accent);color:white;font-weight:650;cursor:pointer;font-size:.95rem}
+button:disabled{opacity:.5;cursor:not-allowed}.secondary{background:#ecebff;color:#38318f}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+#status{margin-top:12px;color:var(--muted);font-size:.92rem}.progress{height:8px;background:#eceef5;border-radius:20px;overflow:hidden;margin-top:10px}.bar{height:100%;width:0;background:var(--accent);transition:width .2s}
+label{display:block;font-weight:650;margin:14px 0 6px}select,input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:white;font:inherit}
+#output{display:none}#sheet{white-space:pre-wrap;line-height:1.7}#sheet h3{margin:18px 0 5px}#sheet p{margin:5px 0}
+.note{background:#fff8df;border:1px solid #f2e4ad;padding:12px;border-radius:10px;color:#66531a;font-size:.9rem}
+footer{text-align:center;color:var(--muted);font-size:.85rem;padding:10px}
+</style>
+</head>
+<body>
+<header><h1>📚 Lernzettel-Generator</h1><p>PDF auswählen, wichtigste Inhalte herausarbeiten und einen Lernzettel erstellen.</p></header>
+<main>
+<section class="card">
+<h2>1. Deine PDF auswählen</h2>
+<p class="muted">Wähle ein PDF-Dokument von deinem Gerät aus. Die Datei wird direkt in deinem Browser verarbeitet.</p>
+<div class="drop" id="drop">
+  <div style="font-size:2.2rem">📄</div>
+  <strong>PDF hier ablegen</strong><br><span class="muted">oder Datei auswählen</span><br><br>
+  <label class="filebutton" for="pdfFile" style="display:inline-block;margin:0">PDF auswählen</label>
+  <input id="pdfFile" type="file" accept="application/pdf">
+  <div id="fileName" class="muted" style="margin-top:10px"></div>
+</div>
+<label for="level">Wie ausführlich soll der Lernzettel sein?</label>
+<select id="level"><option value="short">Kurz – nur das Wichtigste</option><option value="medium" selected>Mittel – mit Erklärungen</option><option value="long">Ausführlich – möglichst viele wichtige Punkte</option></select>
+<label for="subject">Fach oder Thema (optional)</label>
+<input id="subject" type="text" placeholder="z. B. Biologie – Zellaufbau">
+<div class="actions"><button id="make" disabled>Lernzettel erstellen</button></div>
+<div id="status" role="status">Noch keine PDF ausgewählt.</div>
+<div class="progress"><div class="bar" id="bar"></div></div>
+</section>
+<section class="card" id="output">
+<h2>2. Dein Lernzettel</h2>
+<p class="muted" id="meta"></p>
+<div id="sheet"></div>
+<div class="actions">
+<button id="download">Als TXT herunterladen</button>
+<button class="secondary" id="copy">Text kopieren</button>
+<button class="secondary" id="print">Drucken</button>
+</div>
+</section>
+<section class="card">
+<h2>So funktioniert es</h2>
+<p class="muted">Das Tool liest den Text aus deiner PDF aus, erkennt häufige Schlüsselbegriffe und wählt wichtige Sätze aus. Daraus erstellt es eine übersichtliche Zusammenfassung mit Begriffen und Merksätzen.</p>
+<div class="note">Wichtig: Dies ist eine lokale, einfache Zusammenfassung – keine echte KI-Analyse. Prüfe den Lernzettel mit deiner PDF. Bei eingescannten PDFs ohne auswählbaren Text kann das Tool den Inhalt nicht erkennen (dafür wäre OCR nötig).</div>
+</section>
+</main>
+<footer>Deine PDF bleibt auf deinem Gerät und wird nicht auf einen Server hochgeladen.</footer>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const fileInput=document.getElementById('pdfFile'), drop=document.getElementById('drop'), make=document.getElementById('make');
+let selectedFile=null, finalText='';
+function setStatus(t,p){document.getElementById('status').textContent=t;document.getElementById('bar').style.width=(p||0)+'%'}
+function choose(file){if(!file)return;if(file.type!=='application/pdf'&&!file.name.toLowerCase().endsWith('.pdf')){setStatus('Bitte wähle eine PDF-Datei aus.',0);return}selectedFile=file;document.getElementById('fileName').textContent='Ausgewählt: '+file.name;make.disabled=false;setStatus('PDF bereit. Klicke auf „Lernzettel erstellen“.',0)}
+fileInput.addEventListener('change',e=>choose(e.target.files[0]));
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag')}));
+drop.addEventListener('drop',e=>choose(e.dataTransfer.files[0]));
+function clean(s){return s.replace(/\s+/g,' ').replace(/-\s+/g,'').trim()}
+function extractKeywords(text){
+ const stop=new Set(('aber alle allem allen aller alles als also am an andere auch auf aus bei beim bereits bis da dadurch daher damit dann das dass dein deine dem den der des deshalb die dies diese dieser dieses doch dort durch ein eine einem einen einer eines einige für gegen gewesen hat hatte haben hier hin ich im in ist ja jede jedem jeden jeder jedes kann kein keine können kurz man mehr mein mit muss nach nicht noch nun oder ohne sehr sein seine sich sie sind so soll sowie über um und unter vom von vor war waren was weil welche wenn werden wie wir wird wo zu zum zur').split(' '));
+ const words=(text.toLowerCase().match(/[a-zäöüß][a-zäöüß-]{3,}/g)||[]);
+ const freq={};words.forEach(w=>{if(!stop.has(w))freq[w]=(freq[w]||0)+1});
+ return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,12).map(x=>x[0]);
+}
+function sentenceSummary(text,level){
+ const sentences=text.replace(/([.!?])\s+/g,'$1|').split('|').map(clean).filter(s=>s.length>45&&s.length<450);
+ const keys=extractKeywords(text);const scored=sentences.map((s,i)=>({s,i,score:keys.reduce((n,k)=>n+(s.toLowerCase().includes(k)?1:0),0)}));
+ const count=level==='short'?5:level==='long'?14:9;
+ const chosen=scored.sort((a,b)=>b.score-a.score||a.i-b.i).slice(0,count).sort((a,b)=>a.i-b.i);
+ return chosen.map(x=>x.s);
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+make.addEventListener('click',async()=>{
+ if(!selectedFile)return;
+ make.disabled=true;setStatus('PDF wird gelesen …',10);
+ try{
+  const data=new Uint8Array(await selectedFile.arrayBuffer());
+  const pdf=await pdfjsLib.getDocument({data}).promise;let pages=[];
+  for(let i=1;i<=pdf.numPages;i++){
+   const page=await pdf.getPage(i),content=await page.getTextContent();
+   pages.push(content.items.map(x=>x.str).join(' '));setStatus(`Lese Seite ${i} von ${pdf.numPages} …`,10+Math.round(i/pdf.numPages*65));
+  }
+  const text=clean(pages.join(' '));
+  if(text.length<80)throw new Error('Es wurde kaum Text gefunden. Ist die PDF möglicherweise eingescannt?');
+  setStatus('Wichtige Inhalte werden sortiert …',85);
+  const level=document.getElementById('level').value,topic=document.getElementById('subject').value.trim();
+  const keys=extractKeywords(text),summary=sentenceSummary(text,level);
+  const title=topic||selectedFile.name.replace(/\.pdf$/i,'');
+  const sections=[];
+  sections.push('LERNZETTEL: '+title.toUpperCase());
+  sections.push('Erstellt aus: '+selectedFile.name+' | Seiten: '+pdf.numPages);
+  sections.push('');
+  sections.push('DIE WICHTIGSTEN INHALTE');
+  summary.forEach((s,i)=>sections.push((i+1)+'. '+s));
+  sections.push('');
+  sections.push('ZENTRALE SCHLÜSSELBEGRIFFE');
+  sections.push(keys.length?keys.join(' • '):'Keine eindeutigen Schlüsselbegriffe erkannt.');
+  sections.push('');
+  sections.push('MERKHILFE');
+  sections.push('Lerne zuerst die Schlüsselbegriffe. Erkläre anschließend jeden wichtigen Inhalt in eigenen Worten und prüfe, ob du die Zusammenhänge ohne PDF wiedergeben kannst.');
+  sections.push('');
+  sections.push('WIEDERHOLUNGSFRAGEN');
+  sections.push('1. Was sind die drei wichtigsten Aussagen des Themas?');
+  sections.push('2. Welche Schlüsselbegriffe kannst du erklären?');
+  sections.push('3. Wie hängen die wichtigsten Inhalte miteinander zusammen?');
+  finalText=sections.join('\n');
+  document.getElementById('meta').textContent=`${pdf.numPages} Seite(n) verarbeitet · ${text.length.toLocaleString('de-DE')} Zeichen erkannt`;
+  document.getElementById('sheet').innerHTML='<h3>Die wichtigsten Inhalte</h3>'+summary.map((s,i)=>`<p><b>${i+1}.</b> ${escapeHtml(s)}</p>`).join('')+'<h3>Zentrale Schlüsselbegriffe</h3><p>'+escapeHtml(keys.join(' • ')||'Keine erkannt')+'</p><h3>Merkhilfe</h3><p>Präge dir zuerst die Schlüsselbegriffe ein. Erkläre dann die Inhalte in eigenen Worten und wiederhole die Zusammenhänge ohne PDF.</p><h3>Wiederholungsfragen</h3><p>1. Was sind die drei wichtigsten Aussagen?<br>2. Welche Schlüsselbegriffe kannst du erklären?<br>3. Wie hängen die Inhalte zusammen?</p>';
+  document.getElementById('output').style.display='block';setStatus('Fertig! Dein Lernzettel wurde erstellt.',100);document.getElementById('output').scrollIntoView({behavior:'smooth'});
+ }catch(err){setStatus('Fehler: '+err.message,0)}finally{make.disabled=false}
+});
+document.getElementById('download').addEventListener('click',()=>{const blob=new Blob([finalText],{type:'text/plain;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Lernzettel.txt';a.click();URL.revokeObjectURL(a.href)});
+document.getElementById('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(finalText);setStatus('Lernzettel wurde kopiert.',100)}catch(e){setStatus('Kopieren nicht möglich – bitte TXT herunterladen.',0)}});
+document.getElementById('print').addEventListener('click',()=>window.print());
+</script>
+</body>
+</html>
